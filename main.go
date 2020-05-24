@@ -26,7 +26,7 @@ type Server struct {
 }
 
 var servers []*Server
-var openVpnServers []*Server
+var activeOpenVpnServers []*Server
 
 type ByLast []*Server
 
@@ -71,18 +71,18 @@ func main() {
     for i := range servers {
       servers[i].URL = servers[i].Hostname + ".mullvad.net"
       if servers[i].Type == "openvpn" && servers[i].Active {
-        openVpnServers = append(openVpnServers, servers[i])
+        activeOpenVpnServers = append(activeOpenVpnServers, servers[i])
       }
     }
   }
-  fmt.Printf("There are %d openVPN servers\n\n", len(openVpnServers))
+  fmt.Printf("There are %d openVPN servers\n\n", len(activeOpenVpnServers))
 
   // Now we ping them!
 
   var wg sync.WaitGroup
-  wg.Add(len(openVpnServers) - 1)
+  wg.Add(len(activeOpenVpnServers) - 1)
 
-  for _, server := range openVpnServers {
+  for _, server := range activeOpenVpnServers {
     time.Sleep(100 * time.Millisecond)
 
     go func(wg *sync.WaitGroup, server *Server) {
@@ -105,9 +105,9 @@ func main() {
   fmt.Println("------------------------------------------")
   fmt.Println("------------------------------------------")
 
-  sort.Sort(ByLast(openVpnServers))
+  sort.Sort(ByLast(activeOpenVpnServers))
   printed := 0
-  for _, server := range openVpnServers {
+  for _, server := range activeOpenVpnServers {
     if server.Last < 1 {
       continue
     }
