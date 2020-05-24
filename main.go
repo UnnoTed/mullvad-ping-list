@@ -1,29 +1,32 @@
 package main
 
 import (
-	"fmt"
-	"sort"
-	"strings"
-	"sync"
-	"time"
-
-	"golang.org/x/net/html"
-	"golang.org/x/net/html/atom"
-
-	"github.com/franela/goreq"
-	"github.com/nuttapp/pinghist/ping"
-	"github.com/yhat/scrape"
+  "encoding/json"
+  "fmt"
+  "github.com/nuttapp/pinghist/ping"
+  "io/ioutil"
+  "net/http"
+  "sort"
+  "sync"
+  "time"
 )
 
-const URL = "https://www.mullvad.net/guides/our-vpn-servers/"
-
-var servers []*Server
+const URL = "https://api.mullvad.net/www/relays/all/"
 
 type Server struct {
-	List []float64
-	Last float64
-	URL  string
+  List         []float64
+  Last         float64
+  URL          string
+  Hostname     string
+  Country_code string
+  Country_name string
+  City_name    string
+  Active       bool
+  Type         string
 }
+
+var servers []*Server
+var openVpnServers []*Server
 
 type ByLast []*Server
 
@@ -32,110 +35,90 @@ func (a ByLast) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 func (a ByLast) Less(i, j int) bool { return a[i].Last < a[j].Last }
 
 func (s *Server) Ping() (float64, error) {
-	//for i := 0; i < 3; i++ {
-	fmt.Println("Pinging server", s.URL)
-	r, err := ping.Ping(s.URL)
-	if err != nil {
-		return 0, err
-	}
+  //for i := 0; i < 3; i++ {
+  fmt.Println("Pinging server", s.URL)
+  r, err := ping.Ping(s.URL)
+  if err != nil {
+    return 0, err
+  }
 
-	if r.Time < 1 {
-		r.Time = 999999999999
-	}
+  if r.Time < 1 {
+    r.Time = 999999999999
+  }
 
-	s.List = append(s.List, r.Time)
-	s.Last = r.Time
-	//}
+  s.List = append(s.List, r.Time)
+  s.Last = r.Time
+  //}
 
-	return s.Last, nil
+  return s.Last, nil
 }
 
 func main() {
-	req := goreq.Request{
-		Method: "GET",
-		Uri:    URL,
-	}
+  fmt.Println("PING EM ALL AND LET THE SORT SORT EM OUT")
 
-	var (
-		res *goreq.Response
-		err error
-	)
+  response, err := http.Get(URL)
+  if err != nil {
+    fmt.Println("Request Error", err.Error())
+  }
+  defer response.Body.Close()
+  body, err := ioutil.ReadAll(response.Body)
 
-	for {
-		res, err = req.Do()
-		if err != nil {
-			fmt.Println("Request Error", err.Error())
-			continue
-		}
+  jsonErr := json.Unmarshal(body, &servers)
+  fmt.Printf("There are %d servers\n\n", len(servers))
+  if jsonErr != nil {
+    fmt.Println(jsonErr)
+  } else {
+    for i := range servers {
+      servers[i].URL = servers[i].Hostname + ".mullvad.net"
+      if servers[i].Type == "openvpn" && servers[i].Active {
+        openVpnServers = append(openVpnServers, servers[i])
+      }
+    }
+  }
+  fmt.Printf("There are %d openVPN servers\n\n", len(openVpnServers))
 
-		break
-	}
+  // Now we ping them!
 
-	root, err := html.Parse(res.Body)
-	if err != nil {
-		panic(err)
-	}
+  var wg sync.WaitGroup
+  wg.Add(len(openVpnServers) - 1)
 
-	pres := scrape.FindAll(root, func(n *html.Node) bool {
-		return n.DataAtom == atom.Pre
-	})
+  for _, server := range openVpnServers {
+    time.Sleep(100 * time.Millisecond)
 
-	for _, p := range pres {
-		txt := scrape.Text(p)
-		lines := strings.Split(txt, "\n")
+    go func(wg *sync.WaitGroup, server *Server) {
+      for i := 0; i < 3; i++ {
+        _, err := server.Ping()
+        if err != nil {
+          fmt.Println("Error on ping", server.URL, err.Error())
+          continue
+        }
 
-		for _, line := range lines {
-			svr := strings.Split(line, "|")
-			url := svr[len(svr)-1]
+        break
+      }
 
-			if strings.Contains(url, ".mullvad.net") {
-				servers = append(servers, &Server{
-					URL: strings.TrimSpace(url),
-				})
-			}
-		}
-	}
+      wg.Done()
+    }(&wg, server)
+  }
 
-	var wg sync.WaitGroup
-	wg.Add(len(servers) - 1)
+  wg.Wait()
 
-	for _, server := range servers {
-		time.Sleep(100 * time.Millisecond)
+  fmt.Println("------------------------------------------")
+  fmt.Println("------------------------------------------")
 
-		go func(wg *sync.WaitGroup, server *Server) {
-			for i := 0; i < 3; i++ {
-				_, err := server.Ping()
-				if err != nil {
-					fmt.Println("Error on ping", server.URL, err.Error())
-					continue
-				}
+  sort.Sort(ByLast(openVpnServers))
+  printed := 0
+  for _, server := range openVpnServers {
+    if server.Last < 1 {
+      continue
+    }
 
-				break
-			}
+    fmt.Println(server.URL, "\t", server.Last, "ms")
+    fmt.Println("------------------------------------------")
 
-			wg.Done()
-		}(&wg, server)
-	}
+    if printed >= 9 {
+      break
+    }
 
-	wg.Wait()
-
-	fmt.Println("------------------------------------------")
-	fmt.Println("------------------------------------------")
-
-	sort.Sort(ByLast(servers))
-	printed := 0
-	for _, server := range servers {
-		if server.Last < 1 {
-			continue
-		}
-
-		fmt.Println(server.URL, "\t", server.Last, "ms")
-		fmt.Println("------------------------------------------")
-
-		if printed >= 9 {
-			break
-		}
-
-		printed++
-	}
+    printed++
+  }
 }
