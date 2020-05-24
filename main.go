@@ -75,7 +75,7 @@ func main() {
       }
     }
   }
-  fmt.Printf("There are %d openVPN servers\n\n", len(activeOpenVpnServers))
+  fmt.Printf("There are %d active openVPN servers\n\n", len(activeOpenVpnServers))
 
   // Now we ping them!
 
