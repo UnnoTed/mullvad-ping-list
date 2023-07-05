@@ -69,7 +69,7 @@ func main() {
     fmt.Println(jsonErr)
   } else {
     for i := range servers {
-      servers[i].URL = servers[i].Hostname + ".mullvad.net"
+      servers[i].URL = servers[i].Hostname + ".relays.mullvad.net"
       if servers[i].Type == "openvpn" && servers[i].Active {
         activeOpenVpnServers = append(activeOpenVpnServers, servers[i])
       }
